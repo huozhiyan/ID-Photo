@@ -1,0 +1,21 @@
+{
+  "name": "idphoto-web",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "postinstall": "node scripts/copy-ort-wasm.mjs",
+    "dev": "vite",
+    "build": "node scripts/check-model.mjs && vite build",
+    "preview": "vite preview",
+    "download-model": "node scripts/download-model.mjs"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^3.8.1",
+    "vue": "^3.5.42"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.4",
+    "vite": "^6.4.3"
+  }
+}
