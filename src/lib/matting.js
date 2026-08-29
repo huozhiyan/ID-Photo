@@ -87,7 +87,8 @@ export async function run(sourceCanvas) {
   // 去掉散落在背景里的孤立小亮斑（与主体不连通的微小不透明块）
   removeSmallIslands(rawAlpha, cutout.width, cutout.height)
   const bbox = getBBox(rawAlpha, cutout.width, cutout.height)
-  return { cutout, rawAlpha, width: cutout.width, height: cutout.height, bbox }
+  const bgColor = estimateBgColor(sourceCanvas)
+  return { cutout, rawAlpha, width: cutout.width, height: cutout.height, bbox, bgColor }
 }
 
 /**
@@ -264,8 +265,47 @@ function boxBlurBlend(alpha, width, height, blend) {
   }
 }
 
-/** 把优化后的 alpha 套回抠图结果，生成新的透明底 canvas */
-export function applyAlpha(cutout, alpha) {
+/**
+ * 估算原图背景色：采样图像四边环带的所有像素，取每通道中位数。
+ * 中位数对水印、渐变、角落杂物等异常值鲁棒，比均值更可靠。
+ */
+function estimateBgColor(canvas) {
+  const w = canvas.width, h = canvas.height
+  const ctx = canvas.getContext('2d')
+  const band = Math.max(3, Math.round(Math.min(w, h) * 0.03))
+  const rs = [], gs = [], bs = []
+
+  // 上边 + 下边
+  for (let y = 0; y < band; y++) {
+    const topRow = ctx.getImageData(0, y, w, 1).data
+    const botRow = ctx.getImageData(0, h - 1 - y, w, 1).data
+    for (let i = 0; i < topRow.length; i += 4) {
+      rs.push(topRow[i]); gs.push(topRow[i+1]); bs.push(topRow[i+2])
+      rs.push(botRow[i]); gs.push(botRow[i+1]); bs.push(botRow[i+2])
+    }
+  }
+  // 左边 + 右边（排除已采样的角部）
+  for (let y = band; y < h - band; y++) {
+    const leftPx = ctx.getImageData(0, y, band, 1).data
+    const rightPx = ctx.getImageData(w - band, y, band, 1).data
+    for (let i = 0; i < leftPx.length; i += 4) {
+      rs.push(leftPx[i]); gs.push(leftPx[i+1]); bs.push(leftPx[i+2])
+      rs.push(rightPx[i]); gs.push(rightPx[i+1]); bs.push(rightPx[i+2])
+    }
+  }
+
+  const median = (arr) => { arr.sort((a, b) => a - b); return arr[arr.length >> 1] }
+  return [median(rs), median(gs), median(bs)]
+}
+
+/**
+ * 把优化后的 alpha 套回抠图结果，生成新的透明底 canvas。
+ * 当提供 bgColor 时：
+ * 1) 对半透明边缘像素做颜色去污染（反算去除原始背景色贡献）；
+ * 2) 若原始背景偏亮（白/浅色），额外压制边缘亮度——白色高光在换深色底时会显成白点，
+ *    按透明度比例向暗色混合，alpha 越低压制越强，消除白点同时保留发丝细节。
+ */
+export function applyAlpha(cutout, alpha, bgColor = null) {
   const canvas = document.createElement('canvas')
   canvas.width = cutout.width
   canvas.height = cutout.height
@@ -273,17 +313,50 @@ export function applyAlpha(cutout, alpha) {
   const imageData = ctx.createImageData(canvas.width, canvas.height)
   const srcData = cutout.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data
   const out = imageData.data
-  for (let i = 0, j = 3; i < alpha.length; i++, j += 4) {
-    out[j] = alpha[i]
+
+  // 判断原始背景是否偏亮（白/浅色背景需要额外压制）
+  const bgBright = bgColor && (bgColor[0] + bgColor[1] + bgColor[2]) / 3 > 200
+
+  for (let i = 0, j = 0; i < alpha.length; i++, j += 4) {
+    const a = alpha[i]
+    out[j + 3] = a
+
+    if (!bgColor || a <= 10 || a >= 245) {
+      out[j] = srcData[j]
+      out[j + 1] = srcData[j + 1]
+      out[j + 2] = srcData[j + 2]
+    } else {
+      // 标准去污染
+      const aNorm = a / 255
+      const inv = 1 - aNorm
+      let r = clampByte((srcData[j] - inv * bgColor[0]) / aNorm)
+      let g = clampByte((srcData[j + 1] - inv * bgColor[1]) / aNorm)
+      let b = clampByte((srcData[j + 2] - inv * bgColor[2]) / aNorm)
+
+      // 亮背景特化：压制边缘亮度，消除换深色底时的白点
+      // 压制强度随透明度增大（alpha 越低 → 越接近背景 → 越需要压暗）
+      if (bgBright) {
+        const suppress = (1 - aNorm) * 0.7
+        const lum = 0.299 * r + 0.587 * g + 0.114 * b
+        const target = lum * (1 - suppress)
+        const scale = lum > 1 ? target / lum : 0
+        r = clampByte(r * scale)
+        g = clampByte(g * scale)
+        b = clampByte(b * scale)
+      }
+
+      out[j] = r
+      out[j + 1] = g
+      out[j + 2] = b
+    }
   }
-  // RGB 直接复制（预乘问题可忽略：canvas 内部同样按非预乘存储）
-  for (let j = 0; j < srcData.length; j += 4) {
-    out[j] = srcData[j]
-    out[j + 1] = srcData[j + 1]
-    out[j + 2] = srcData[j + 2]
-  }
+
   ctx.putImageData(imageData, 0, 0)
   return canvas
+}
+
+function clampByte(v) {
+  return v < 0 ? 0 : v > 255 ? 255 : Math.round(v)
 }
 
 /** alpha 包围盒，找不到人物时返回 null */

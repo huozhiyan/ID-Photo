@@ -335,6 +335,53 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* ---- Repair tools ---- */
+
+.repair-tools {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.repair-mode,
+.repair-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.repair-row input[type="range"] {
+  flex: 1;
+}
+
+.repair-label {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.color-preview {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+}
+
+.color-hex {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  font-family: monospace;
+}
+
+.btn.tiny {
+  padding: 4px 10px;
+  font-size: 0.8rem;
+}
+
 /* ---- Panels ---- */
 
 .panel {

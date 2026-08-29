@@ -8,8 +8,13 @@ const props = defineProps({
   photoW: { type: Number, required: true },
   photoH: { type: Number, required: true },
   transform: { type: Object, required: true }, // { x, y, scale }，成品像素坐标系
+  // ---- 修补工具 ----
+  toolMode: { type: String, default: 'move' }, // move | brush | eyedropper
+  paintCanvas: { type: Object, default: null }, // 修补层（照片像素坐标系）
+  brushColor: { type: String, default: '#ffffff' },
+  brushSize: { type: Number, default: 12 },
 })
-const emit = defineEmits(['update:transform', 'reset'])
+const emit = defineEmits(['update:transform', 'reset', 'color-picked', 'painted'])
 
 const MIN_SCALE = 0.02
 const MAX_SCALE = 10
@@ -93,6 +98,10 @@ function draw() {
       props.cutout.height * props.transform.scale,
     )
   }
+
+  if (props.paintCanvas) {
+    ctx.drawImage(props.paintCanvas, 0, 0)
+  }
 }
 
 function drawChecker(ctx) {
@@ -109,10 +118,77 @@ function drawChecker(ctx) {
 }
 
 watch(
-  [() => props.cutout, () => props.bg, () => props.photoW, () => props.photoH, () => props.transform, displayScale],
+  [() => props.cutout, () => props.bg, () => props.photoW, () => props.photoH, () => props.transform, () => props.paintCanvas, displayScale],
   requestDraw,
   { deep: true },
 )
+
+// ---- 修补工具：画笔 / 吸管 / 撤销 ----
+
+let lastPaintPoint = null
+const undoStack = []
+const MAX_UNDO = 20
+
+function paintAt(p) {
+  const pc = props.paintCanvas
+  if (!pc) return
+  const pctx = pc.getContext('2d')
+  pctx.fillStyle = props.brushColor
+  pctx.strokeStyle = props.brushColor
+  pctx.lineWidth = props.brushSize
+  pctx.lineCap = 'round'
+  pctx.lineJoin = 'round'
+  if (lastPaintPoint) {
+    pctx.beginPath()
+    pctx.moveTo(lastPaintPoint.x, lastPaintPoint.y)
+    pctx.lineTo(p.x, p.y)
+    pctx.stroke()
+  } else {
+    pctx.beginPath()
+    pctx.arc(p.x, p.y, props.brushSize / 2, 0, Math.PI * 2)
+    pctx.fill()
+  }
+  lastPaintPoint = p
+  requestDraw()
+}
+
+function pickColor(p) {
+  const canvas = canvasEl.value
+  if (!canvas) return
+  const k = canvas.width / props.photoW
+  const px = Math.round(clamp(p.x, 0, props.photoW - 1) * k)
+  const py = Math.round(clamp(p.y, 0, props.photoH - 1) * k)
+  const d = canvas.getContext('2d').getImageData(px, py, 1, 1).data
+  const hex = '#' + [d[0], d[1], d[2]].map((v) => v.toString(16).padStart(2, '0')).join('')
+  emit('color-picked', hex)
+}
+
+function pushUndo() {
+  const pc = props.paintCanvas
+  if (!pc) return
+  undoStack.push(pc.getContext('2d').getImageData(0, 0, pc.width, pc.height))
+  if (undoStack.length > MAX_UNDO) undoStack.shift()
+}
+
+function undo() {
+  const pc = props.paintCanvas
+  if (!pc || !undoStack.length) return
+  const img = undoStack.pop()
+  pc.getContext('2d').putImageData(img, 0, 0)
+  emit('painted')
+  requestDraw()
+}
+
+function clearPaint() {
+  const pc = props.paintCanvas
+  if (!pc) return
+  pushUndo()
+  pc.getContext('2d').clearRect(0, 0, pc.width, pc.height)
+  emit('painted')
+  requestDraw()
+}
+
+defineExpose({ undo, clearPaint })
 
 // ---- 指针交互：拖拽 / 双指捏合 / 滚轮缩放 ----
 
@@ -144,6 +220,18 @@ function zoomAt(anchorWorld, targetScale, origin = props.transform) {
 function onPointerDown(e) {
   canvasEl.value.setPointerCapture(e.pointerId)
   pointers.set(e.pointerId, toWorld(e))
+
+  if (props.toolMode === 'eyedropper') {
+    pickColor(toWorld(e))
+    return
+  }
+  if (props.toolMode === 'brush') {
+    pushUndo()
+    lastPaintPoint = null
+    paintAt(toWorld(e))
+    return
+  }
+
   if (pointers.size === 1) {
     dragState = { start: toWorld(e), origin: { ...props.transform } }
   } else if (pointers.size === 2) {
@@ -156,6 +244,13 @@ function onPointerDown(e) {
 function onPointerMove(e) {
   if (!pointers.has(e.pointerId)) return
   pointers.set(e.pointerId, toWorld(e))
+
+  if (props.toolMode === 'brush') {
+    paintAt(toWorld(e))
+    return
+  }
+  if (props.toolMode === 'eyedropper') return
+
   if (pointers.size === 1 && dragState) {
     const p = toWorld(e)
     emit('update:transform', {
@@ -172,6 +267,14 @@ function onPointerMove(e) {
 
 function onPointerUp(e) {
   pointers.delete(e.pointerId)
+
+  if (props.toolMode === 'brush') {
+    lastPaintPoint = null
+    emit('painted')
+    return
+  }
+  if (props.toolMode === 'eyedropper') return
+
   if (pointers.size < 2) pinchState = null
   if (pointers.size === 1) {
     const [p] = [...pointers.values()]
@@ -209,7 +312,7 @@ function setScale(v) {
     <div ref="wrapper" class="canvas-wrap">
       <canvas
         ref="canvasEl"
-        :style="{ width: cssW + 'px', height: cssH + 'px' }"
+        :style="{ width: cssW + 'px', height: cssH + 'px', cursor: toolMode === 'move' ? 'grab' : 'crosshair' }"
         @pointerdown.prevent="onPointerDown"
         @pointermove="onPointerMove"
         @pointerup="onPointerUp"
@@ -239,6 +342,14 @@ function setScale(v) {
       </label>
       <button class="btn" @click="emit('reset')">重置位置</button>
     </div>
-    <p class="canvas-hint">可直接在画布上拖拽移动、滚轮或双指缩放</p>
+    <p class="canvas-hint">
+      {{
+        toolMode === 'brush'
+          ? '画笔模式：在画布上涂抹以修补瑕疵区域'
+          : toolMode === 'eyedropper'
+            ? '吸管模式：点击画面任意位置吸取颜色'
+            : '可直接在画布上拖拽移动、滚轮或双指缩放'
+      }}
+    </p>
   </div>
 </template>

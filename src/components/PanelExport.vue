@@ -18,6 +18,8 @@ const props = defineProps({
   bg: { type: String, default: null },
   bgName: { type: String, default: '' },
   settings: { type: Object, required: true },
+  paintCanvas: { type: Object, default: null }, // 用户修补层
+  paintTick: { type: Number, default: 0 }, // 修补内容变化计数
 })
 const emit = defineEmits(['toast'])
 
@@ -37,6 +39,7 @@ function compose() {
     bg: props.bg,
     wPx: photoPx.value.w,
     hPx: photoPx.value.h,
+    paintCanvas: props.paintCanvas,
   })
 }
 
@@ -111,7 +114,7 @@ function rebuildLayout() {
 }
 
 watch(
-  [grid, layoutTooLarge, () => props.cutout, () => props.transform, () => props.bg, () => props.dpi, () => props.settings.cutLines],
+  [grid, layoutTooLarge, () => props.cutout, () => props.transform, () => props.bg, () => props.dpi, () => props.settings.cutLines, () => props.paintTick],
   () => {
     clearTimeout(layoutTimer)
     layoutTimer = setTimeout(rebuildLayout, 200)

@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"></head>
+<body>
+<pre id="out">running…</pre>
+<script type="module">
+  import { composeIdPhoto } from '/src/lib/render.js'
+  const out = []; const log = (...a) => { out.push(a.join(' ')); document.getElementById('out').textContent = out.join('\n') }
+
+  // cutout: 10x10 全黑不透明
+  const cutout = document.createElement('canvas'); cutout.width = 10; cutout.height = 10
+  const cctx = cutout.getContext('2d'); cctx.fillStyle = '#000000'; cctx.fillRect(0, 0, 10, 10)
+
+  // paint: 中心 4x4 纯红
+  const paint = document.createElement('canvas'); paint.width = 10; paint.height = 10
+  const pctx = paint.getContext('2d'); pctx.fillStyle = '#ff0000'; pctx.fillRect(3, 3, 4, 4)
+
+  const noPaint = composeIdPhoto({ cutout, transform: { x: 0, y: 0, scale: 1 }, bg: '#ffffff', wPx: 10, hPx: 10 })
+  const withPaint = composeIdPhoto({ cutout, transform: { x: 0, y: 0, scale: 1 }, bg: '#ffffff', wPx: 10, hPx: 10, paintCanvas: paint })
+
+  const sample = (c, x, y) => { const d = c.getContext('2d').getImageData(x, y, 1, 1).data; return [d[0], d[1], d[2]] }
+
+  log('无修补层 中心(5,5):', sample(noPaint, 5, 5).join(','), '(应为 0,0,0 黑)')
+  log('有修补层 中心(5,5):', sample(withPaint, 5, 5).join(','), '(应为 255,0,0 红)')
+  log('有修补层 角落(0,0):', sample(withPaint, 0, 0).join(','), '(应为 0,0,0 黑，未被涂到)')
+
+  const centerOk = sample(withPaint, 5, 5).join(',') === '255,0,0'
+  const cornerOk = sample(withPaint, 0, 0).join(',') === '0,0,0'
+  const noPaintOk = sample(noPaint, 5, 5).join(',') === '0,0,0'
+  log((centerOk && cornerOk && noPaintOk) ? 'PASS ✅ 修补层正确合成进导出' : 'FAIL ❌')
+  window.__DONE__ = true
+</script>
+</body>
+</html>

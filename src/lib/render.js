@@ -3,8 +3,9 @@ import { mmToPx } from './presets.js'
 /**
  * transform: { x, y, scale } —— 以成品像素为坐标系，
  * 抠图结果按 scale 缩放后左上角位于 (x, y)。
+ * paintCanvas：可选的用户修补层（与成品同尺寸），叠在抠图结果之上。
  */
-export function composeIdPhoto({ cutout, transform, bg, wPx, hPx }) {
+export function composeIdPhoto({ cutout, transform, bg, wPx, hPx, paintCanvas = null }) {
   const canvas = document.createElement('canvas')
   canvas.width = wPx
   canvas.height = hPx
@@ -20,6 +21,9 @@ export function composeIdPhoto({ cutout, transform, bg, wPx, hPx }) {
     cutout.width * transform.scale,
     cutout.height * transform.scale,
   )
+  if (paintCanvas) {
+    ctx.drawImage(paintCanvas, 0, 0)
+  }
   return canvas
 }
 
